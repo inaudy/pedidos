@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:pedidos/features/stock/presentation/pages/stock_page.dart';
-import 'package:pedidos/register_page.dart';
-// Your stock app's main page
+import 'package:go_router/go_router.dart';
 
 class LoginPage extends StatefulWidget {
   @override
@@ -35,13 +33,21 @@ class _LoginPageState extends State<LoginPage> {
 
       if (userDoc.exists) {
         String userRole = userDoc['role'];
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-              builder: (context) => StockPage(
-                    userRole: userRole,
-                  )), // Navigate to stock app
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Role: $userRole")),
         );
+
+        print(userRole);
+
+        // ✅ Use `context.go()` instead of `Navigator.pushReplacement`
+        if (userRole == "adm" || userRole == "superuser") {
+          context.go('/', extra: userRole); // ✅ Navigate correctly
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("Access denied: $userRole")),
+          );
+        }
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text("User data not found.")),
@@ -87,10 +93,7 @@ class _LoginPageState extends State<LoginPage> {
                   ),
             TextButton(
               onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => RegisterPage()),
-                );
+                context.push('/register'); // ✅ Use `GoRouter`
               },
               child: Text("Don't have an account? Sign up"),
             ),

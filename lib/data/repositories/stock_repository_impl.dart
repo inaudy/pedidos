@@ -1,78 +1,76 @@
-import 'package:pedidos/data/datasources/local/stock_db_helper.dart';
-import 'package:pedidos/data/models/stock_item.dart';
-import 'package:pedidos/domain/entities/stock_item.dart';
-import 'package:pedidos/domain/repositories/stock_repository.dart';
+import 'package:pedidos/core/network/network_info.dart';
+import 'package:pedidos/core/network/sync_manager.dart';
+import 'package:pedidos/data/models/stock_item_model.dart';
+import '../../domain/repositories/stock_repository.dart';
+import '../../domain/entities/stock_item.dart';
+import '../../domain/entities/stock_transaction.dart';
+import '../datasources/local/local_stock_data_source.dart';
+import '../datasources/remote/remote_stock_data_source.dart';
 
 class StockRepositoryImpl implements StockRepository {
-  final StockDataBase dbHelper;
+  final LocalStockDataSource localDataSource;
+  final RemoteStockDataSource remoteDataSource;
+  final SyncManager syncManager;
+  final NetworkInfo networkInfo;
 
-  StockRepositoryImpl(this.dbHelper);
+  StockRepositoryImpl({
+    required this.localDataSource,
+    required this.remoteDataSource,
+    required this.syncManager,
+    required this.networkInfo,
+  });
 
   @override
-  Future<List<StockItem>> getAllStockItems() async {
-    final List<Map<String, dynamic>> maps = await dbHelper.getAllStockItems();
-    return maps.map((map) => StockItemModel.fromMap(map)).toList();
+  Future<List<StockItem>> getAllStock(String posId) async {
+    return (await localDataSource.getAllStock(posId))
+        .map((model) => model.toEntity())
+        .toList();
+  }
+
+  /// ✅ Update stock based on a transaction & mark as unsynced
+  @override
+  Future<void> updateStockBasedOnTransaction(
+      StockTransaction transaction) async {
+    print("📢 Updating stock for transaction: ${transaction.stockId}");
+
+    // ✅ Fetch the latest local stock
+    final stock = await getStockById(transaction.stockId, transaction.posId);
+
+    final newQuantity = stock.quantity + transaction.change;
+    final updatedStock = stock.copyWith(
+      quantity: newQuantity,
+      updatedAt: DateTime.now(), // ✅ Update the timestamp
+    );
+
+    await localDataSource
+        .saveStockItem(StockItemModel.fromEntity(updatedStock));
+    await localDataSource.markStockAsUnsynced(transaction.stockId);
+
+    print("✅ Stock updated locally & marked as unsynced.");
+
+    // ✅ Attempt to sync only the affected item if online
+    if (await networkInfo.isConnected) {
+      await syncManager.syncStockItemToFirestore(
+          transaction.posId, transaction.stockId);
+    }
+  }
+
+  /// ✅ Get stock (use SQLite first, fallback to Firestore)
+  @override
+  Future<StockItem> getStockById(String stockId, String posId) async {
+    final localStock = await localDataSource.getStockById(stockId, posId);
+    if (localStock != null) return localStock.toEntity();
+
+    if (await networkInfo.isConnected) {
+      return await syncManager.fetchStockFromFirestore(stockId, posId);
+    }
+
+    throw Exception("Stock item not found: $stockId");
   }
 
   @override
-  Future<void> addStockItem(StockItem item) async {
-    final model = item is StockItemModel
-        ? item
-        : StockItemModel(
-            name: item.name,
-            quantity: item.quantity,
-            category: item.category,
-            unit: item.unit,
-            lot: item.lot,
-            min: item.min,
-            max: item.max,
-            transfer: item.transfer,
-            barcode: item.barcode,
-            error: item.error,
-          );
-    await dbHelper.createStockItem(model.toMap());
-  }
-
-  @override
-  Future<void> updateStockItem(StockItem item) async {
-    final model = item is StockItemModel
-        ? item
-        : StockItemModel(
-            name: item.name,
-            quantity: item.quantity,
-            category: item.category,
-            unit: item.unit,
-            lot: item.lot,
-            min: item.min,
-            max: item.max,
-            transfer: item.transfer,
-            barcode: item.barcode,
-            error: item.error,
-          );
-    await dbHelper.updateStockItem(model.toMap(), model.name);
-  }
-
-  @override
-  Future<void> bulkInsert(List<StockItem> items) async {
-    //Convert the list of StockItem to a list of Map
-    final itemsMap = items.map((item) {
-      final model = item is StockItemModel
-          ? item
-          : StockItemModel(
-              name: item.name,
-              quantity: item.quantity,
-              category: item.category,
-              unit: item.unit,
-              lot: item.lot,
-              min: item.min,
-              max: item.max,
-              transfer: item.transfer,
-              barcode: item.barcode,
-              error: item.error,
-            );
-      return model.toMap();
-    }).toList();
-    //Use the bulkInsert method from the database helper
-    await dbHelper.bulkInsertStockItem(itemsMap);
+  Future<double> getCurrentStock(String stockId, String posId) async {
+    final stock = await getStockById(stockId, posId);
+    return stock.quantity;
   }
 }
