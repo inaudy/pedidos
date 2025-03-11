@@ -1,20 +1,32 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:pedidos/domain/entities/stock_item.dart';
+import 'package:pedidos/features/authentication/presentation/cubits/auth_cubit.dart';
+import 'package:pedidos/features/authentication/presentation/cubits/auth_state.dart';
+import 'package:pedidos/features/pos/presentation/bloc/pos_state.dart';
 import 'package:pedidos/features/stock/presentation/bloc/stock_cubit.dart';
 import 'package:pedidos/features/stock/presentation/bloc/stock_state.dart';
-import 'package:pedidos/features/stock/presentation/bloc/stock_transaction_cubit.dart';
+import 'package:pedidos/features/pos/presentation/bloc/pos_cubit.dart';
 import 'package:pedidos/core/network/connectivity_cubit.dart';
+import 'package:pedidos/features/stock/presentation/bloc/stock_transaction_cubit.dart';
 
 class StockPage extends StatelessWidget {
-  final String posId;
-  final String userRole;
-
-  const StockPage({super.key, required this.posId, required this.userRole});
+  const StockPage({super.key});
 
   @override
   Widget build(BuildContext context) {
-    // ✅ Load stock when page opens
+    final posState = context.watch<PosCubit>().state;
+    final authState = context.watch<AuthCubit>().state;
+
+    final String posId = posState is PosSelected ? posState.posId : '';
+    final String userRole =
+        authState is AuthAuthenticated ? authState.role : '';
+
+    if (posId.isEmpty || userRole.isEmpty) {
+      return const Center(child: Text("No POS selected or unauthorized."));
+    }
+
+    // Trigger stock load
     context.read<StockCubit>().loadStock(posId);
 
     return Scaffold(
@@ -42,7 +54,6 @@ class StockPage extends StatelessWidget {
   }
 }
 
-/// ✅ Stock Item Tile
 class StockItemTile extends StatelessWidget {
   final StockItem stock;
   final String posId;
@@ -59,7 +70,6 @@ class StockItemTile extends StatelessWidget {
   }
 }
 
-/// ✅ Inline Editable Quantity Field
 class _EditableQuantityField extends StatefulWidget {
   final StockItem stock;
   final String posId;
@@ -84,13 +94,12 @@ class _EditableQuantityFieldState extends State<_EditableQuantityField> {
   Widget build(BuildContext context) {
     return _isEditing
         ? SizedBox(
-            width: 70, // ✅ Compact input field
+            width: 70,
             child: TextField(
               controller: _controller,
               keyboardType: TextInputType.number,
               autofocus: true,
               onSubmitted: (value) => _saveQuantity(context, value),
-              onTapOutside: (_) => _saveQuantity(context, _controller.text),
               decoration: const InputDecoration(
                 contentPadding:
                     EdgeInsets.symmetric(horizontal: 8, vertical: 5),
@@ -108,10 +117,8 @@ class _EditableQuantityFieldState extends State<_EditableQuantityField> {
                 color: Colors.grey[200],
               ),
               child: Center(
-                child: Text(
-                  widget.stock.quantity.toString(),
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
+                child: Text(widget.stock.quantity.toString(),
+                    style: const TextStyle(fontWeight: FontWeight.bold)),
               ),
             ),
           );
@@ -121,16 +128,13 @@ class _EditableQuantityFieldState extends State<_EditableQuantityField> {
     final double? newQuantity = double.tryParse(value);
     if (newQuantity != null && newQuantity != widget.stock.quantity) {
       final double difference = newQuantity - widget.stock.quantity;
-
-      // ✅ Call StockTransactionCubit to handle stock updates
       context.read<StockTransactionCubit>().processTransaction(
             stockId: widget.stock.stockId,
             posId: widget.posId,
             change: difference,
             type: "correction",
             user: "Admin",
-            connectivityCubit:
-                context.read<ConnectivityCubit>(), // Check network status
+            connectivityCubit: context.read<ConnectivityCubit>(),
           );
     }
     setState(() => _isEditing = false);

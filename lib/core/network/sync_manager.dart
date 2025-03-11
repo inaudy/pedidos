@@ -1,5 +1,7 @@
 import 'package:pedidos/core/network/network_info.dart';
+import 'package:pedidos/data/datasources/local/local_pos_data_source.dart';
 import 'package:pedidos/data/datasources/local/local_stock_data_source.dart';
+import 'package:pedidos/data/datasources/remote/remote_pos_data_source.dart';
 import 'package:pedidos/data/datasources/remote/remote_stock_data_source.dart';
 import 'package:pedidos/data/datasources/local/local_stock_transaction_data_source.dart';
 import 'package:pedidos/data/datasources/remote/remote_stock_transaction_data_source.dart';
@@ -9,6 +11,8 @@ class SyncManager {
   final LocalStockDataSource localStockDataSource;
   final RemoteStockDataSource remoteStockDataSource;
   final LocalStockTransactionDataSource localTransactionDataSource;
+  final LocalPosDataSource localPosDataSource;
+  final RemotePosDataSource remotePosDataSource;
   final RemoteStockTransactionDataSource remoteTransactionDataSource;
   final NetworkInfo networkInfo;
 
@@ -16,36 +20,40 @@ class SyncManager {
     required this.localStockDataSource,
     required this.remoteStockDataSource,
     required this.localTransactionDataSource,
+    required this.localPosDataSource,
+    required this.remotePosDataSource,
     required this.remoteTransactionDataSource,
     required this.networkInfo,
   });
 
-  /// ✅ Initialize the local database if it's empty by fetching from Firestore
-  Future<void> initializeLocalDatabase() async {
-    final posIds = await _getAllPosIds();
+  /// ✅ Initialize the local database for a selected POS
+  Future<void> initializeLocalDatabase(String posId) async {
+    final hasLocalData = await localStockDataSource.hasData(posId);
 
-    for (final posId in posIds) {
-      final hasLocalData = await localStockDataSource.hasData(posId);
-
-      if (!hasLocalData) {
-        print("🆕 Initializing local database for POS: $posId...");
-
-        if (!await networkInfo.isConnected) {
-          print("🚫 No internet connection. Cannot fetch Firestore data.");
-          continue;
-        }
-
-        final remoteStock = await remoteStockDataSource.getAllStock(posId);
-
-        for (final stockItem in remoteStock) {
-          await localStockDataSource.saveStockItem(stockItem);
-        }
-
-        print("✅ Local database initialized for POS: $posId.");
-      } else {
-        print("✅ Local database already initialized for POS: $posId.");
+    if (!hasLocalData && await networkInfo.isConnected) {
+      print("🆕 Initializing local database for POS: $posId...");
+      final remoteStock = await remoteStockDataSource.getAllStock(posId);
+      for (final stockItem in remoteStock) {
+        await localStockDataSource.saveStockItem(stockItem);
       }
+      print("✅ Local database initialized for POS: $posId.");
+    } else {
+      print("✅ Local database already initialized for POS: $posId.");
     }
+  }
+
+  /// ✅ Sync POS data from Firestore to SQLite
+  Future<void> syncPosFromFirestore() async {
+    if (!await networkInfo.isConnected) {
+      print("🚫 No internet. Skipping POS sync.");
+      return;
+    }
+
+    final remotePosList = await remotePosDataSource.getAllPos();
+    for (final pos in remotePosList) {
+      await localPosDataSource.savePos(pos);
+    }
+    print("✅ POS data synced from Firestore to SQLite.");
   }
 
   /// ✅ Sync all pending transactions and stock updates
@@ -182,12 +190,28 @@ class SyncManager {
     }
   }
 
+  /// ✅ Sync POS data from SQLite to Firestore
+  Future<void> syncPosToFirestore() async {
+    final unsyncedPosList = await localPosDataSource.getUnsyncedPos();
+    for (final pos in unsyncedPosList) {
+      await remotePosDataSource.savePos(pos);
+      await localPosDataSource.markPosAsSynced(pos.id);
+    }
+    print("✅ POS data synced to Firestore.");
+  }
+
   /// ✅ Trigger sync when internet is restored
   Future<void> scheduleSyncWhenOnline() async {
     if (await networkInfo.isConnected) {
       print("🔄 Internet Restored. Syncing all pending data...");
       await syncAllPending();
     }
+  }
+
+  /// ✅ Fetch all POS IDs dynamically
+  Future<List<String>> getAllPosIds() async {
+    final localPosList = await localPosDataSource.getAllPos();
+    return localPosList.map((pos) => pos.id).toList();
   }
 
   /// ✅ Fetch all POS IDs dynamically instead of hardcoding

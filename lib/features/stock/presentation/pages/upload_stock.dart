@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 
 /// ✅ Function to upload stock data from Excel to Firestore using Auto-ID
 Future<void> uploadExcelToFirestore(String posId) async {
+  print('starting');
   // ✅ Pick Excel File
   FilePickerResult? result = await FilePicker.platform.pickFiles(
     type: FileType.custom,
@@ -30,8 +31,8 @@ Future<void> uploadExcelToFirestore(String posId) async {
     var row = rows[i];
 
     // ✅ Ensure row has enough columns before processing
-    if (row.length < 11) continue; // Now checking for transfer column too
-
+    //if (row.length < 11) continue; // Now checking for transfer column too
+    print('before try');
     try {
       String name = row[0]?.value.toString() ?? '';
       double quantity = double.tryParse(row[1]?.value.toString() ?? '0') ?? 0;

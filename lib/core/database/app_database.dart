@@ -54,6 +54,15 @@ class AppDatabase {
       )
     ''');
 
+    await db.execute('''
+    CREATE TABLE IF NOT EXISTS pos (
+      id TEXT PRIMARY KEY,
+      name TEXT,
+      location TEXT,
+      synced INTEGER DEFAULT 0
+    )
+  ''');
+
     // ✅ Create `stock_transactions` table (Fix foreign key reference)
     await db.execute('''
       CREATE TABLE stock_transactions (
